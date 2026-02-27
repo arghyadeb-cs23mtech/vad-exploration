@@ -1,0 +1,12 @@
+[project]
+name = "cleanup-vad"
+version = "0.1.0"
+description = "Standalone Silero streaming VAD demo with clip export"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24.0",
+    "torch>=2.0.0",
+    "torchaudio>=2.0.0",
+    "packaging>=24.0",
+]
