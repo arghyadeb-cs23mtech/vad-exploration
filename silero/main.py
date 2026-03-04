@@ -25,7 +25,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--padding-ms", type=int, default=120, help="Clip padding in ms"
     )
     parser.add_argument(
+        "--min-silence-ms", type=int, default=100, help="Minimum period of silence in milliseconds"
+    )
+    parser.add_argument(
         "--output-dir", type=Path, default=None, help="Output root (optional)"
+    )
+    parser.add_argument(
+        "--min-output-len", type=int, default=1, help="Minimum length of the audio output chunks in seconds"
     )
     parser.add_argument(
         "--chunk-output",
@@ -43,6 +49,7 @@ def save_config_file(
     sample_rate: int,
     segments_count: int,
     clips_count: int,
+    min_silence_ms: int,
 ) -> Path:
     config_path = output_path / "config.txt"
     config_content = "\n".join(
@@ -53,6 +60,7 @@ def save_config_file(
             f"sample_rate={sample_rate}",
             f"segments_detected={segments_count}",
             f"clips_written={clips_count}",
+            f"min_silence_ms={min_silence_ms}",
         ]
     )
     config_path.write_text(config_content + "\n", encoding="utf-8")
@@ -76,14 +84,19 @@ def main() -> None:
             print(f"[streaming] auto-resampled from {sample_rate} Hz to {target_sr} Hz")
         sample_rate = target_sr
 
-    vad = SileroStreamingVad(threshold=args.threshold)
+    vad = SileroStreamingVad(
+        threshold=args.threshold,
+        min_silence_ms=args.min_silence_ms,
+        sample_rate=sample_rate,
+        padding_ms=args.padding_ms,
+    )
     vad.reset()
 
     segments = []
     for chunk_index, chunk in enumerate(
         iter_audio_chunks(audio, sample_rate, STREAMING_CHUNK_MS), start=1
     ):
-        chunk_segments = vad.process_chunk(chunk, sample_rate)
+        chunk_segments = vad.process_chunk(chunk)
         if args.chunk_output and chunk_segments:
             for segment in chunk_segments:
                 print(
@@ -97,7 +110,6 @@ def main() -> None:
     slices = build_padded_slices(
         segments=segments,
         total_duration_s=total_duration_s,
-        padding_ms=args.padding_ms,
     )
 
     if args.chunk_output:
@@ -117,13 +129,13 @@ def main() -> None:
             segments=segments,
             output_dir=output_path,
             prefix="silero_streaming",
-            padding_ms=args.padding_ms,
         )
         config_path = save_config_file(
             output_path=output_path,
             audio_path=args.audio,
             threshold=args.threshold,
             padding_ms=args.padding_ms,
+            min_silence_ms=args.min_silence_ms,
             sample_rate=sample_rate,
             segments_count=len(segments),
             clips_count=len(written),

@@ -11,16 +11,12 @@ from .types import VadSegment
 def build_padded_slices(
     segments: list[VadSegment],
     total_duration_s: float,
-    padding_ms: int,
 ) -> list[tuple[float, float, list[VadSegment]]]:
-    if padding_ms < 0:
-        raise ValueError("padding_ms must be >= 0")
 
-    padding_s = padding_ms / 1000.0
     padded_segments: list[tuple[float, float, VadSegment]] = []
     for segment in segments:
-        start_s = max(0.0, segment.start_s - padding_s)
-        end_s = min(total_duration_s, segment.end_s + padding_s)
+        start_s = max(0.0, segment.start_s)
+        end_s = min(total_duration_s, segment.end_s)
         if end_s > start_s:
             padded_segments.append((start_s, end_s, segment))
 
@@ -49,12 +45,10 @@ def build_padded_slices(
 def build_padded_ranges(
     segments: list[VadSegment],
     total_duration_s: float,
-    padding_ms: int,
 ) -> list[tuple[float, float]]:
     slices = build_padded_slices(
         segments=segments,
         total_duration_s=total_duration_s,
-        padding_ms=padding_ms,
     )
     return [(start_s, end_s) for start_s, end_s, _ in slices]
 
@@ -65,7 +59,6 @@ def export_vad_clips(
     segments: list[VadSegment],
     output_dir: str | Path,
     prefix: str,
-    padding_ms: int = 120,
 ) -> list[Path]:
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -75,7 +68,6 @@ def export_vad_clips(
     slices = build_padded_slices(
         segments=segments,
         total_duration_s=total_duration_s,
-        padding_ms=padding_ms,
     )
 
     written_paths: list[Path] = []
