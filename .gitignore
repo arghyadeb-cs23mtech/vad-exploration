@@ -132,5 +132,6 @@ dmypy.json
 demo_clips/
 
 *.wav
+*.csv
 
 .ruff_cache/

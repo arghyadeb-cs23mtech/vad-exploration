@@ -10,3 +10,8 @@ dependencies = [
     "torchaudio>=2.0.0",
     "packaging>=24.0",
 ]
+
+[tool.uv.workspace]
+members = [
+    "benchmark",
+]
