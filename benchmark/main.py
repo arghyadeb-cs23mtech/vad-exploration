@@ -139,16 +139,18 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    THRESHOLD = 0.8
-    MIN_SILENCE_MS = 200
-    PADDING_MS = 0
-    SAMPLE_RATE = 16000
-    run(
-        input_dir=Path("../recordings"),
-        output=Path(f"{DEFAULT_OUTPUT}_thr{THRESHOLD}_sil{MIN_SILENCE_MS}ms_pad{PADDING_MS}.csv"),
-        threshold=THRESHOLD,
-        min_silence_ms=MIN_SILENCE_MS,
-        padding_ms=PADDING_MS,
-        sample_rate=SAMPLE_RATE,
-        verbose=False,
-    )
+    # THRESHOLD = 0.5
+    # MIN_SILENCE_MS = 120
+    # PADDING_MS = 0
+    # SAMPLE_RATE = 16000
+    # run(
+    #     input_dir=Path("../recordings"),
+    #     output=Path(f"{DEFAULT_OUTPUT}_thr{THRESHOLD}_sil{MIN_SILENCE_MS}ms_pad{PADDING_MS}.csv"),
+    #     threshold=THRESHOLD,
+    #     min_silence_ms=MIN_SILENCE_MS,
+    #     padding_ms=PADDING_MS,
+    #     sample_rate=SAMPLE_RATE,
+    #     verbose=False,
+    # )
+
+    main()
