@@ -28,6 +28,7 @@ def compute_stats(results: list[FileVadResult]) -> dict[str, object]:
             "total_speech_s": round(sum(durations), 4) if durations else 0.0,
         })
 
+    count_over_30s = sum(1 for d in all_durations if d > 30.0)
     if not all_durations:
         logger.warning("No speech segments detected across any file.")
         return {
@@ -38,6 +39,7 @@ def compute_stats(results: list[FileVadResult]) -> dict[str, object]:
             "p90": 0.0,
             "p99": 0.0,
             "total_segments": 0,
+            "count_over_30s": 0,
         }
 
     arr = np.array(all_durations, dtype=np.float64)
@@ -49,6 +51,7 @@ def compute_stats(results: list[FileVadResult]) -> dict[str, object]:
         "p90": float(np.percentile(arr, 90)),
         "p99": float(np.percentile(arr, 99)),
         "total_segments": len(arr),
+        "count_over_30s": count_over_30s,
     }
 
 
@@ -79,7 +82,7 @@ def save_results_csv(
         # --- Section 2: aggregate summary (appended after a blank line) ---
         fh.write("\n")
         fh.write("# Aggregate chunk-duration statistics\n")
-        for key in ("mean", "median", "max", "p90", "p99", "total_segments"):
+        for key in ("mean", "median", "max", "p90", "p99", "total_segments", "count_over_30s"):
             value = stats.get(key, "")
             if isinstance(value, float):
                 fh.write(f"# {key},{value:.6f}\n")
