@@ -8,6 +8,8 @@ from .types import VadSegment
 
 
 class SileroStreamingVad:
+    name = "silero"
+
     def __init__(
             self,
             threshold: float = 0.5,
@@ -22,6 +24,9 @@ class SileroStreamingVad:
         self._utils: tuple[Any, ...] | None = None
         self._iterator: Any = None
         self._sample_rate: int = sample_rate
+        # Silero VAD v5 requires exactly 512 samples per call at 16 kHz, 256 at 8 kHz.
+        self.chunk_samples: int = 512 if sample_rate == 16000 else 256
+        self.sample_rate = sample_rate
         self._stream_offset_s: float = 0.0
         self._open_segment_start_s: float | None = None
         self._load_model()

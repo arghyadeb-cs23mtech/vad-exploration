@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 import logging
+import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import numpy as np
-from audio import TARGET_SAMPLE_RATE, discover_wav_files, load_and_prepare
+
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+from audio import TARGET_SAMPLE_RATE, discover_wav_files, load_and_prepare  # noqa: E402
+
+from vadcore.factory import create_vad  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -19,81 +27,21 @@ class FileVadResult:
     path: Path
     sample_rate: int
     duration_s: float
-    segments: list[tuple[float, float]]  # (start_s, end_s)
+    segments: list[tuple[float, float]]
 
     @property
     def chunk_durations(self) -> list[float]:
         return [end - start for start, end in self.segments]
 
 
-# ---------------------------------------------------------------------------
-# Silero model loading (done once, shared across files)
-# ---------------------------------------------------------------------------
-
-def _load_silero_model() -> tuple[Any, tuple[Any, ...]]:
-    try:
-        import torch
-    except ImportError as exc:
-        raise RuntimeError("Silero VAD requires 'torch'. Install it first.") from exc
-
-    loaded = torch.hub.load(
-        repo_or_dir="snakers4/silero-vad",
-        model="silero_vad",
-        trust_repo=True,
-        onnx=False,
-    )
-    model, utils = cast(tuple[Any, tuple[Any, ...]], loaded)
-    return model, utils
-
-
-def _create_iterator(
-    model: Any,
-    utils: tuple[Any, ...],
-    *,
-    threshold: float,
-    min_silence_ms: int,
-    padding_ms: int,
-    sample_rate: int,
-) -> Any:
-    vad_iterator_cls = utils[3]
-    return vad_iterator_cls(
-        model,
-        threshold=threshold,
-        sampling_rate=sample_rate,
-        min_silence_duration_ms=min_silence_ms,
-        speech_pad_ms=padding_ms,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Process a single file
-# ---------------------------------------------------------------------------
-
-def _process_file(
-    path: Path,
-    model: Any,
-    utils: tuple[Any, ...],
-    *,
-    threshold: float,
-    min_silence_ms: int,
-    padding_ms: int,
-    target_sr: int,
-    chunk_ms: int = STREAMING_CHUNK_MS,
-) -> FileVadResult:
+def _process_file(path: Path, vad: Any, *, target_sr: int) -> FileVadResult:
     audio, sr = load_and_prepare(path, target_sr=target_sr)
     duration_s = len(audio) / float(sr)
 
-    iterator = _create_iterator(
-        model, utils,
-        threshold=threshold,
-        min_silence_ms=min_silence_ms,
-        padding_ms=padding_ms,
-        sample_rate=sr,
-    )
-    chunk_size = int(sr * (chunk_ms / 1000.0))
+    vad.reset()
+    chunk_size = vad.chunk_samples
     segments: list[tuple[float, float]] = []
-    open_start: float | None = None
-    offset_s = 0.0
+
     for start in range(0, len(audio), chunk_size):
         chunk = audio[start : start + chunk_size]
         if len(chunk) < chunk_size:
@@ -101,19 +49,11 @@ def _process_file(
             padded[: len(chunk)] = chunk
             chunk = padded
 
-        event = iterator(chunk, return_seconds=True)
-        offset_s += len(chunk) / float(sr)
+        for seg in vad.process_chunk(chunk):
+            segments.append((seg.start_s, seg.end_s))
 
-        if event:
-            if "start" in event:
-                open_start = float(event["start"])
-            if "end" in event and open_start is not None:
-                segments.append((open_start, float(event["end"])))
-                open_start = None
-
-    # flush open segment
-    if open_start is not None:
-        segments.append((open_start, offset_s))
+    for seg in vad.flush():
+        segments.append((seg.start_s, seg.end_s))
 
     return FileVadResult(
         path=path,
@@ -123,23 +63,18 @@ def _process_file(
     )
 
 
-# ---------------------------------------------------------------------------
-# Batch processing with progress
-# ---------------------------------------------------------------------------
-
 def process_directory(
     input_dir: Path,
     *,
+    vad_model: str = "silero",
     threshold: float = 0.5,
     min_silence_ms: int = 100,
     padding_ms: int = 30,
     target_sr: int = TARGET_SAMPLE_RATE,
-    chunk_ms: int = STREAMING_CHUNK_MS,
+    chunk_ms: int = STREAMING_CHUNK_MS,  # accepted for CLI compat; only Silero is fixed at 32 ms today
+    **vad_kwargs: Any,
 ) -> list[FileVadResult]:
-    """Discover all WAV files under *input_dir* and run Silero VAD on each.
-
-    Progress is logged at every 10 % boundary.
-    """
+    """Discover all WAV files under *input_dir* and run the selected streaming VAD on each."""
     files = discover_wav_files(input_dir)
     if not files:
         return []
@@ -147,30 +82,35 @@ def process_directory(
     total = len(files)
     logger.info("Found %d WAV file(s) in %s", total, input_dir)
     logger.info(
-        "Silero params — threshold=%.2f  min_silence_ms=%d  padding_ms=%d  sample_rate=%d",
-        threshold, min_silence_ms, padding_ms, target_sr,
+        "VAD params — model=%s  threshold=%.2f  min_silence_ms=%d  padding_ms=%d  sample_rate=%d  chunk_ms_hint=%d",
+        vad_model, threshold, min_silence_ms, padding_ms, target_sr, chunk_ms,
     )
+    if vad_kwargs:
+        logger.info("VAD extra — %s", vad_kwargs)
 
-    logger.info("Loading Silero VAD model …")
-    model, utils = _load_silero_model()
-    logger.info("Model loaded.")
+    logger.info("Loading %s VAD …", vad_model)
+    vad = create_vad(
+        vad_model,
+        sample_rate=target_sr,
+        threshold=threshold,
+        min_silence_ms=min_silence_ms,
+        padding_ms=padding_ms,
+        **vad_kwargs,
+    )
+    actual_chunk_ms = 1000.0 * vad.chunk_samples / target_sr
+    logger.info(
+        "Model loaded — chunk_samples=%d (%.1f ms @ %d Hz).",
+        vad.chunk_samples, actual_chunk_ms, target_sr,
+    )
 
     results: list[FileVadResult] = []
     last_pct_logged = -1
 
     for idx, fpath in enumerate(files, start=1):
-        result = _process_file(
-            fpath, model, utils,
-            threshold=threshold,
-            min_silence_ms=min_silence_ms,
-            padding_ms=padding_ms,
-            target_sr=target_sr,
-            chunk_ms=chunk_ms,
-        )
+        result = _process_file(fpath, vad, target_sr=target_sr)
         results.append(result)
 
         pct = int(idx / total * 100)
-        # Log at every 10% boundary (and always at 100%)
         pct_bucket = (pct // 10) * 10
         if pct_bucket > last_pct_logged:
             last_pct_logged = pct_bucket

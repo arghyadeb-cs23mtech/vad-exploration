@@ -135,3 +135,5 @@ demo_clips/
 *.csv
 
 .ruff_cache/
+
+local/
